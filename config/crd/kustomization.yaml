@@ -3,6 +3,7 @@
 # It should be run by config/default
 resources:
 - bases/network.apollo.network_apollonetworkpools.yaml
+- bases/network.apollo.network_apolloportallocations.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 patches:

@@ -1,0 +1,52 @@
+apiVersion: network.apollo.network/v1
+kind: ApolloPortAllocation
+metadata:
+  labels:
+    app.kubernetes.io/name: apollo-network-controller
+    app.kubernetes.io/managed-by: kustomize
+  name: apolloportallocation-sample
+  namespace: default
+spec:
+  networkPoolRef:
+    name: production-pool
+    namespace: ""
+  podInfo:
+    name: example-pod
+    namespace: default
+    uid: "12345678-1234-1234-1234-123456789abc"
+    podIP: "10.244.0.5"
+    nodeName: "worker-node-1"
+    labels:
+      app: "example-app"
+      version: "v1.0.0"
+  portBindings:
+    - podPort: 8080
+      lbPort: 8080
+      protocol: "TCP"
+      portName: "http"
+      bindingType: "volcengine-clb"
+      loadBalancerRef:
+        id: "clb-12345"
+        region: "cn-beijing"
+        provider: "volcengine"
+      bindingConfig:
+        healthCheckPath: "/health"
+        healthCheckInterval: 30
+        healthCheckTimeout: 5
+        targetWeight: 100
+        sessionAffinity: "None"
+    - podPort: 9090
+      lbPort: 9090
+      protocol: "TCP"
+      portName: "metrics"
+      bindingType: "volcengine-clb"
+      loadBalancerRef:
+        id: "clb-12345"
+        region: "cn-beijing"
+        provider: "volcengine"
+      bindingConfig:
+        healthCheckPath: "/metrics"
+        healthCheckInterval: 60
+        healthCheckTimeout: 10
+        targetWeight: 50
+  requestedAt: "2025-10-02T10:00:00Z"

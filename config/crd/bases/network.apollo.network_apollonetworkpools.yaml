@@ -12,12 +12,13 @@ spec:
     listKind: ApolloNetworkPoolList
     plural: apollonetworkpools
     singular: apollonetworkpool
-  scope: Namespaced
+  scope: Cluster
   versions:
   - name: v1
     schema:
       openAPIV3Schema:
-        description: ApolloNetworkPool is the Schema for the apollonetworkpools API.
+        description: ApolloNetworkPool is the Schema for the apollo network pools
+          API.
         properties:
           apiVersion:
             description: |-
@@ -39,13 +40,259 @@ spec:
           spec:
             description: ApolloNetworkPoolSpec defines the desired state of ApolloNetworkPool.
             properties:
-              foo:
-                description: Foo is an example field of ApolloNetworkPool. Edit apollonetworkpool_types.go
-                  to remove/update
+              ispLineType:
+                description: ISPLineType specifies the ISP line type
                 type: string
+              loadBalancers:
+                description: LoadBalancers reference to existing load balancer
+                items:
+                  description: LoadBalancerRef defines reference to an existing load
+                    balancer
+                  properties:
+                    id:
+                      description: ID is the unique identifier of the load balancer
+                      type: string
+                    provider:
+                      description: Provider is the cloud provider (e.g., "volcengine")
+                      type: string
+                    region:
+                      description: Region is the region where the load balancer is
+                        located
+                      type: string
+                    resourceGroup:
+                      description: ResourceGroup is the resource group name (if applicable)
+                      type: string
+                  required:
+                  - id
+                  - region
+                  type: object
+                type: array
+              podSelector:
+                description: PodSelector is a label selector to identify which pods
+                  should use this network pool
+                properties:
+                  matchExpressions:
+                    description: matchExpressions is a list of label selector requirements.
+                      The requirements are ANDed.
+                    items:
+                      description: |-
+                        A label selector requirement is a selector that contains values, a key, and an operator that
+                        relates the key and values.
+                      properties:
+                        key:
+                          description: key is the label key that the selector applies
+                            to.
+                          type: string
+                        operator:
+                          description: |-
+                            operator represents a key's relationship to a set of values.
+                            Valid operators are In, NotIn, Exists and DoesNotExist.
+                          type: string
+                        values:
+                          description: |-
+                            values is an array of string values. If the operator is In or NotIn,
+                            the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                            the values array must be empty. This array is replaced during a strategic
+                            merge patch.
+                          items:
+                            type: string
+                          type: array
+                          x-kubernetes-list-type: atomic
+                      required:
+                      - key
+                      - operator
+                      type: object
+                    type: array
+                    x-kubernetes-list-type: atomic
+                  matchLabels:
+                    additionalProperties:
+                      type: string
+                    description: |-
+                      matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                      map is equivalent to an element of matchExpressions, whose key field is "key", the
+                      operator is "In", and the values array contains only "value". The requirements are ANDed.
+                    type: object
+                type: object
+                x-kubernetes-map-type: atomic
+              portRange:
+                description: PortRange defines the available port range for allocation
+                properties:
+                  excludedPorts:
+                    description: ExcludedPorts is a list of ports that should not
+                      be allocated
+                    items:
+                      format: int32
+                      type: integer
+                    type: array
+                  max:
+                    description: Max is the maximum port number
+                    format: int32
+                    type: integer
+                  min:
+                    description: Min is the minimum port number
+                    format: int32
+                    type: integer
+                required:
+                - max
+                - min
+                type: object
+              prewarmConfig:
+                description: PrewarmConfig defines the port prewarming configuration
+                properties:
+                  bufferSize:
+                    description: BufferSize is the number of ports to keep prewarmed
+                    format: int32
+                    type: integer
+                  enabled:
+                    description: Enabled indicates whether prewarming is enabled
+                    type: boolean
+                required:
+                - enabled
+                type: object
+            required:
+            - ispLineType
+            - loadBalancers
+            - portRange
             type: object
           status:
             description: ApolloNetworkPoolStatus defines the observed state of ApolloNetworkPool.
+            properties:
+              allocations:
+                additionalProperties:
+                  properties:
+                    allocatedCount:
+                      description: AllocatedCount is the number of currently allocated
+                        ports
+                      format: int32
+                      type: integer
+                    allocatedPorts:
+                      description: AllocatedPorts contains information about currently
+                        allocated ports
+                      items:
+                        description: PortAllocation represents port allocations to
+                          a specific pod
+                        properties:
+                          allocatedAt:
+                            description: AllocatedAt is the timestamp when the ports
+                              were allocated
+                            format: date-time
+                            type: string
+                          loadBalancer:
+                            description: LoadBalancer reference to the load balancer
+                              these ports are allocated on
+                            properties:
+                              id:
+                                description: ID is the unique identifier of the load
+                                  balancer
+                                type: string
+                              provider:
+                                description: Provider is the cloud provider (e.g.,
+                                  "volcengine")
+                                type: string
+                              region:
+                                description: Region is the region where the load balancer
+                                  is located
+                                type: string
+                              resourceGroup:
+                                description: ResourceGroup is the resource group name
+                                  (if applicable)
+                                type: string
+                            required:
+                            - id
+                            - region
+                            type: object
+                          podName:
+                            description: PodName is the name of the pod using these
+                              ports
+                            type: string
+                          podNamespace:
+                            description: PodNamespace is the namespace of the pod
+                              using these ports
+                            type: string
+                          podUID:
+                            description: PodUID is the UID of the pod using these
+                              ports
+                            type: string
+                          portMappings:
+                            description: PortMappings contains the detailed port allocation
+                              mappings
+                            items:
+                              description: PodPortAllocation represents the mapping
+                                between a pod port and its allocated LB port
+                              properties:
+                                lbPort:
+                                  description: LBPort is the allocated load balancer
+                                    port that maps to the pod port
+                                  format: int32
+                                  type: integer
+                                podPort:
+                                  description: PodPort is the port number exposed
+                                    by the pod/container
+                                  format: int32
+                                  type: integer
+                                portName:
+                                  description: PortName is the name of the port (from
+                                    container port definition)
+                                  type: string
+                                protocol:
+                                  description: Protocol specifies the network protocol
+                                    for this port mapping
+                                  type: string
+                              required:
+                              - lbPort
+                              - podPort
+                              - protocol
+                              type: object
+                            type: array
+                        required:
+                        - loadBalancer
+                        - podName
+                        - podNamespace
+                        - portMappings
+                        type: object
+                      type: array
+                    availableCount:
+                      description: AvailableCount is the number of available ports
+                        for allocation
+                      format: int32
+                      type: integer
+                    isSynced:
+                      description: IsSynced indicates whether the loadbalancer has
+                        been successfully synchronized.
+                      type: boolean
+                    lastUpdated:
+                      description: LastUpdated is the timestamp of the last status
+                        update
+                      format: date-time
+                      type: string
+                    phase:
+                      description: Phase represents the current phase of the network
+                        pool
+                      type: string
+                    prewarmedCount:
+                      description: PrewarmedCount is the number of currently prewarmed
+                        ports
+                      format: int32
+                      type: integer
+                    prewarmedPorts:
+                      description: PrewarmedPorts contains list of prewarmed port
+                        numbers
+                      items:
+                        format: int32
+                        type: integer
+                      type: array
+                    totalPorts:
+                      description: TotalPorts is the total number of ports in the
+                        configured range
+                      format: int32
+                      type: integer
+                  type: object
+                description: Allocations maps LoadBalancer ID to its allocation status
+                type: object
+              isSynced:
+                description: IsSynced indicates whether the network pool has been
+                  successfully synchronized.
+                type: boolean
             type: object
         type: object
     served: true

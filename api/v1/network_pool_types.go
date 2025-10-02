@@ -100,13 +100,13 @@ type ApolloNetworkPoolSpec struct {
 type PodPortAllocation struct {
 	// PodPort is the port number exposed by the pod/container
 	PodPort int32 `json:"podPort"`
-	
+
 	// LBPort is the allocated load balancer port that maps to the pod port
 	LBPort int32 `json:"lbPort"`
-	
+
 	// Protocol specifies the network protocol for this port mapping
 	Protocol Protocol `json:"protocol"`
-	
+
 	// PortName is the name of the port (from container port definition)
 	PortName string `json:"portName,omitempty"`
 }
@@ -118,7 +118,7 @@ type PortAllocation struct {
 
 	// PodNamespace is the namespace of the pod using these ports
 	PodNamespace string `json:"podNamespace"`
-	
+
 	// PodUID is the UID of the pod using these ports
 	PodUID string `json:"podUID,omitempty"`
 
@@ -165,7 +165,7 @@ type LoadBalancerAllocateStatus struct {
 type ApolloNetworkPoolStatus struct {
 	// Allocations maps LoadBalancer ID to its allocation status
 	Allocations map[string]LoadBalancerAllocateStatus `json:"allocations,omitempty"`
-	
+
 	// IsSynced indicates whether the network pool has been successfully synchronized.
 	IsSynced bool `json:"isSynced,omitempty"`
 }
@@ -196,84 +196,83 @@ func init() {
 	SchemeBuilder.Register(&ApolloNetworkPool{}, &ApolloNetworkPoolList{})
 }
 
-
 // GetAllPorts returns all individual LB ports from all allocations
 func (status *LoadBalancerAllocateStatus) GetAllPorts() []int32 {
-    var allPorts []int32
-    for _, alloc := range status.AllocatedPorts {
-        for _, mapping := range alloc.PortMappings {
-            allPorts = append(allPorts, mapping.LBPort)
-        }
-    }
-    return allPorts
+	var allPorts []int32
+	for _, alloc := range status.AllocatedPorts {
+		for _, mapping := range alloc.PortMappings {
+			allPorts = append(allPorts, mapping.LBPort)
+		}
+	}
+	return allPorts
 }
 
 // GetPortCount returns the total number of allocated LB ports
 func (status *LoadBalancerAllocateStatus) GetPortCount() int32 {
-    count := int32(0)
-    for _, alloc := range status.AllocatedPorts {
-        count += int32(len(alloc.PortMappings))
-    }
-    return count
+	count := int32(0)
+	for _, alloc := range status.AllocatedPorts {
+		count += int32(len(alloc.PortMappings))
+	}
+	return count
 }
 
 // FindAllocationByPod finds port allocation for a specific pod
 func (status *LoadBalancerAllocateStatus) FindAllocationByPod(podName, podNamespace string) *PortAllocation {
-    for i := range status.AllocatedPorts {
-        alloc := &status.AllocatedPorts[i]
-        if alloc.PodName == podName && alloc.PodNamespace == podNamespace {
-            return alloc
-        }
-    }
-    return nil
+	for i := range status.AllocatedPorts {
+		alloc := &status.AllocatedPorts[i]
+		if alloc.PodName == podName && alloc.PodNamespace == podNamespace {
+			return alloc
+		}
+	}
+	return nil
 }
 
 // RemoveAllocationByPod removes port allocation for a specific pod
 func (status *LoadBalancerAllocateStatus) RemoveAllocationByPod(podName, podNamespace string) bool {
-    for i, alloc := range status.AllocatedPorts {
-        if alloc.PodName == podName && alloc.PodNamespace == podNamespace {
-            // Remove the allocation by slicing
-            status.AllocatedPorts = append(status.AllocatedPorts[:i], status.AllocatedPorts[i+1:]...)
-            return true
-        }
-    }
-    return false
+	for i, alloc := range status.AllocatedPorts {
+		if alloc.PodName == podName && alloc.PodNamespace == podNamespace {
+			// Remove the allocation by slicing
+			status.AllocatedPorts = append(status.AllocatedPorts[:i], status.AllocatedPorts[i+1:]...)
+			return true
+		}
+	}
+	return false
 }
 
 // GetAllLBPorts returns all allocated LB ports from the allocation
 func (alloc *PortAllocation) GetAllLBPorts() []int32 {
-    var lbPorts []int32
-    for _, mapping := range alloc.PortMappings {
-        lbPorts = append(lbPorts, mapping.LBPort)
-    }
-    return lbPorts
+	var lbPorts []int32
+	for _, mapping := range alloc.PortMappings {
+		lbPorts = append(lbPorts, mapping.LBPort)
+	}
+	return lbPorts
 }
 
 // GetAllPodPorts returns all pod ports from the allocation
 func (alloc *PortAllocation) GetAllPodPorts() []int32 {
-    var podPorts []int32
-    for _, mapping := range alloc.PortMappings {
-        podPorts = append(podPorts, mapping.PodPort)
-    }
-    return podPorts
+	var podPorts []int32
+	for _, mapping := range alloc.PortMappings {
+		podPorts = append(podPorts, mapping.PodPort)
+	}
+	return podPorts
 }
 
 // FindPortMappingByPodPort finds port mapping by pod port
 func (alloc *PortAllocation) FindPortMappingByPodPort(podPort int32) *PodPortAllocation {
-    for i := range alloc.PortMappings {
-        if alloc.PortMappings[i].PodPort == podPort {
-            return &alloc.PortMappings[i]
-        }
-    }
-    return nil
+	for i := range alloc.PortMappings {
+		if alloc.PortMappings[i].PodPort == podPort {
+			return &alloc.PortMappings[i]
+		}
+	}
+	return nil
 }
 
 // FindPortMappingByLBPort finds port mapping by LB port
 func (alloc *PortAllocation) FindPortMappingByLBPort(lbPort int32) *PodPortAllocation {
-    for i := range alloc.PortMappings {
-        if alloc.PortMappings[i].LBPort == lbPort {
-            return &alloc.PortMappings[i]
-        }
-    }
-    return nil
+	for i := range alloc.PortMappings {
+		if alloc.PortMappings[i].LBPort == lbPort {
+			return &alloc.PortMappings[i]
+		}
+	}
+	return nil
 }

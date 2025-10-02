@@ -22,6 +22,9 @@ resources:
 # default, aiding admins in cluster management. Those roles are
 # not used by the apollo-network-controller itself. You can comment the following lines
 # if you do not want those helpers be installed with your Project.
+- apolloportallocation_admin_role.yaml
+- apolloportallocation_editor_role.yaml
+- apolloportallocation_viewer_role.yaml
 - apollonetworkpool_admin_role.yaml
 - apollonetworkpool_editor_role.yaml
 - apollonetworkpool_viewer_role.yaml
