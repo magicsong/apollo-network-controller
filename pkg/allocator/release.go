@@ -37,7 +37,7 @@ func (pa *PoolAllocator) ReleasePort(ctx context.Context, poolName, namespace st
 	if pool.Status.Allocations != nil {
 		for lbID, lbStatus := range pool.Status.Allocations {
 			for _, alloc := range lbStatus.AllocatedPorts {
-				if alloc.PodName == podName && alloc.PodNamespace == podNamespace {
+				if alloc.Spec.PodInfo.Name == podName && alloc.Spec.PodInfo.Namespace == podNamespace {
 					targetLBID = lbID
 					found = true
 					// Skip this allocation (remove it)
@@ -61,7 +61,12 @@ func (pa *PoolAllocator) ReleasePort(ctx context.Context, poolName, namespace st
 
 	// Update the status with removed allocation
 	currentLBStatus.AllocatedPorts = updatedAllocations
-	currentLBStatus.AllocatedCount = currentLBStatus.GetPortCount()
+	// Count ports manually since GetPortCount method doesn't exist
+	portCount := int32(0)
+	for _, alloc := range currentLBStatus.AllocatedPorts {
+		portCount += int32(len(alloc.Spec.PortBindings))
+	}
+	currentLBStatus.AllocatedCount = portCount
 	currentLBStatus.AvailableCount = totalPorts - currentLBStatus.AllocatedCount - currentLBStatus.PrewarmedCount
 
 	// Update timestamp

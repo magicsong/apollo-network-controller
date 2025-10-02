@@ -24,62 +24,76 @@ func (pa *PoolAllocator) tryAllocatePort(ctx context.Context, poolName, namespac
 		return nil, fmt.Errorf("failed to get pool %s: %w", poolName, err)
 	}
 
+	// 1.5. Get current allocations
+	allocations := &apollov1.PortAllocationList{}
+	err := pa.client.List(ctx, allocations, client.MatchingLabels{LabelPoolNameKey: pool.Name})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list port allocations: %w", err)
+	}
+
 	// 2. Select load balancer
-	selectedLB, err := pa.SelectLoadBalancer(pool, len(containerPorts))
+	selectedLB, err := pa.SelectLoadBalancer(ctx, pool, len(containerPorts))
 	if err != nil {
 		return nil, fmt.Errorf("failed to select load balancer: %w", err)
 	}
 
 	// 3. Find available ports for selected LB
-	lbPorts, err := pa.findAvailablePorts(pool, selectedLB, len(containerPorts))
+	lbPorts, err := pa.findAvailablePorts(pool, allocations, selectedLB, len(containerPorts))
 	if err != nil {
 		return nil, fmt.Errorf("failed to find available ports on LB %s: %w", selectedLB.ID, err)
 	}
 
-	// 4. Create port mappings
-	portMappings := make([]apollov1.PodPortAllocation, len(containerPorts))
+	// 4. Create port bindings
+	portBindings := make([]apollov1.PortBinding, len(containerPorts))
 	for i, containerPort := range containerPorts {
-		portMappings[i] = apollov1.PodPortAllocation{
-			PodPort:  containerPort.PodPort,
-			LBPort:   lbPorts[i],
-			Protocol: containerPort.Protocol,
-			PortName: containerPort.PortName,
+		portBindings[i] = apollov1.PortBinding{
+			PodPort:         containerPort.PodPort,
+			LBPort:          lbPorts[i],
+			Protocol:        containerPort.Protocol,
+			PortName:        containerPort.PortName,
+			BindingType:     apollov1.GetDefaultBindingType(),
+			LoadBalancerRef: *selectedLB,
 		}
 	}
 
 	// 5. Create allocation
 	allocation := &apollov1.PortAllocation{
-		PodName:      podName,
-		PodNamespace: podNamespace,
-		PortMappings: portMappings,
-		LoadBalancer: *selectedLB,
-		AllocatedAt:  &metav1.Time{Time: time.Now()},
+		Spec: apollov1.PortAllocationSpec{
+			PodInfo: apollov1.PodInfo{
+				Name:      podName,
+				Namespace: podNamespace,
+			},
+			PortBindings: portBindings,
+		},
+		Status: apollov1.PortAllocationStatus{
+			Phase:       apollov1.AllocationPhasePending,
+			AllocatedAt: &metav1.Time{Time: time.Now()},
+		},
 	}
 
 	// 6. Update pool atomically
 	return allocation, pa.updatePoolWithAllocation(ctx, pool, allocation)
 }
 
-// getLBPortUsage returns the number of ports used by this LB
-func (pa *PoolAllocator) getLBPortUsage(pool *apollov1.ApolloNetworkPool, lb *apollov1.LoadBalancerRef) int32 {
-	// Check if we have allocation status for this LB
-	if pool.Status.Allocations == nil {
-		return 0
+// getLBPortUsage returns the number of ports used by this LB based on allocation list
+func (pa *PoolAllocator) getLBPortUsage(allocationList *apollov1.PortAllocationList, lb *apollov1.LoadBalancerRef) int32 {
+	var usage int32 = 0
+	
+	// Count ports allocated to this specific LB from the allocation list
+	for _, allocation := range allocationList.Items {
+		for _, binding := range allocation.Spec.PortBindings {
+			if binding.LoadBalancerRef.ID == lb.ID {
+				usage++
+			}
+		}
 	}
-
-	// Get allocation status for this specific LB
-	lbStatus, exists := pool.Status.Allocations[lb.ID]
-	if !exists {
-		return 0
-	}
-
-	// Return the allocated count for this LB
-	return lbStatus.AllocatedCount
+	
+	return usage
 }
 
 // hasAvailablePorts checks if the LB has enough available ports for the requested count
-func (pa *PoolAllocator) hasAvailablePorts(pool *apollov1.ApolloNetworkPool, lb *apollov1.LoadBalancerRef, portCount int) bool {
-	usage := pa.getLBPortUsage(pool, lb)
+func (pa *PoolAllocator) hasAvailablePorts(pool *apollov1.ApolloNetworkPool, allocationList *apollov1.PortAllocationList, lb *apollov1.LoadBalancerRef, portCount int) bool {
+	usage := pa.getLBPortUsage(allocationList, lb)
 	totalPorts := pool.Spec.PortRange.Max - pool.Spec.PortRange.Min + 1 - int32(len(pool.Spec.PortRange.ExcludedPorts))
 	availablePorts := totalPorts - usage
 	
@@ -94,31 +108,33 @@ func (pa *PoolAllocator) hasAvailablePorts(pool *apollov1.ApolloNetworkPool, lb 
 }
 
 // hasAvailablePort checks if the LB has at least one available port (backward compatibility)
-func (pa *PoolAllocator) hasAvailablePort(pool *apollov1.ApolloNetworkPool, lb *apollov1.LoadBalancerRef) bool {
-	return pa.hasAvailablePorts(pool, lb, 1)
+func (pa *PoolAllocator) hasAvailablePort(pool *apollov1.ApolloNetworkPool, allocationList *apollov1.PortAllocationList, lb *apollov1.LoadBalancerRef) bool {
+	return pa.hasAvailablePorts(pool, allocationList, lb, 1)
 }
 
 // findAvailablePorts finds multiple available ports on the specified LB
 func (pa *PoolAllocator) findAvailablePorts(pool *apollov1.ApolloNetworkPool,
-	lb *apollov1.LoadBalancerRef, count int) ([]int32, error) {
+	allocationList *apollov1.PortAllocationList, lb *apollov1.LoadBalancerRef, count int) ([]int32, error) {
 
 	if count <= 0 {
 		return nil, fmt.Errorf("port count must be positive, got %d", count)
 	}
 
-	// Build set of allocated ports for this LB
+	// Build set of allocated ports for this LB from the allocation list
 	allocatedPorts := make(map[int32]bool)
 
-	// Get LB-specific allocation status
+	// Get allocated ports for this specific LB from allocation list
+	for _, allocation := range allocationList.Items {
+		for _, binding := range allocation.Spec.PortBindings {
+			if binding.LoadBalancerRef.ID == lb.ID {
+				allocatedPorts[binding.LBPort] = true
+			}
+		}
+	}
+
+	// Also consider prewarmed ports from pool status as occupied
 	if pool.Status.Allocations != nil {
 		if lbStatus, exists := pool.Status.Allocations[lb.ID]; exists {
-			// Get all ports from all allocations
-			allPorts := lbStatus.GetAllPorts()
-			for _, port := range allPorts {
-				allocatedPorts[port] = true
-			}
-
-			// Prewarmed ports for this LB
 			for _, port := range lbStatus.PrewarmedPorts {
 				allocatedPorts[port] = true
 			}
@@ -157,8 +173,11 @@ type PatchOperation struct {
 func (pa *PoolAllocator) updatePoolWithAllocation(ctx context.Context,
 	pool *apollov1.ApolloNetworkPool, allocation *apollov1.PortAllocation) error {
 
-	// Create patch for the specific LB allocation
-	lbID := allocation.LoadBalancer.ID
+	// Get LB ID from the first port binding (assuming all bindings use the same LB)
+	if len(allocation.Spec.PortBindings) == 0 {
+		return fmt.Errorf("no port bindings found in allocation")
+	}
+	lbID := allocation.Spec.PortBindings[0].LoadBalancerRef.ID
 
 	// Calculate updated counters
 	totalPorts := pool.Spec.PortRange.Max - pool.Spec.PortRange.Min + 1 - int32(len(pool.Spec.PortRange.ExcludedPorts))
@@ -174,8 +193,12 @@ func (pa *PoolAllocator) updatePoolWithAllocation(ctx context.Context,
 	// Add new allocation to the current status
 	currentLBStatus.AllocatedPorts = append(currentLBStatus.AllocatedPorts, *allocation)
 
-	// Update counters
-	currentLBStatus.AllocatedCount = currentLBStatus.GetPortCount()
+	// Update counters - count ports manually since GetPortCount method doesn't exist
+	portCount := int32(0)
+	for _, alloc := range currentLBStatus.AllocatedPorts {
+		portCount += int32(len(alloc.Spec.PortBindings))
+	}
+	currentLBStatus.AllocatedCount = portCount
 	currentLBStatus.TotalPorts = totalPorts
 	currentLBStatus.AvailableCount = totalPorts - currentLBStatus.AllocatedCount - currentLBStatus.PrewarmedCount
 

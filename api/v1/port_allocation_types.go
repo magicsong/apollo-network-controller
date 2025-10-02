@@ -48,12 +48,6 @@ type PodInfo struct {
 
 	// PodIP is the IP address of the pod
 	PodIP string `json:"podIP,omitempty"`
-
-	// NodeName is the name of the node where the pod is running
-	NodeName string `json:"nodeName,omitempty"`
-
-	// Labels are the labels of the pod
-	Labels map[string]string `json:"labels,omitempty"`
 }
 
 // PortBinding defines the binding information between pod port and load balancer port
@@ -82,15 +76,6 @@ type PortBinding struct {
 
 // BindingConfig defines additional configuration for load balancer binding
 type BindingConfig struct {
-	// HealthCheckPath is the path for health check (for HTTP/HTTPS)
-	HealthCheckPath string `json:"healthCheckPath,omitempty"`
-
-	// HealthCheckInterval is the interval between health checks in seconds
-	HealthCheckInterval int32 `json:"healthCheckInterval,omitempty"`
-
-	// HealthCheckTimeout is the timeout for health check in seconds
-	HealthCheckTimeout int32 `json:"healthCheckTimeout,omitempty"`
-
 	// TargetWeight is the weight for load balancing
 	TargetWeight int32 `json:"targetWeight,omitempty"`
 
@@ -116,6 +101,9 @@ const (
 
 	// AllocationPhaseUnbinding indicates the ports are being unbound
 	AllocationPhaseUnbinding AllocationPhase = "Unbinding"
+
+	// AllocationPhasePortConflict indicates the ports are in conflict
+	AllocationPhasePortConflict AllocationPhase = "PortConflict"
 )
 
 // BindingStatus represents the binding status for a specific port
@@ -142,32 +130,17 @@ type BindingStatus struct {
 	LoadBalancerConfig map[string]string `json:"loadBalancerConfig,omitempty"`
 }
 
-// ApolloPortAllocationSpec defines the desired state of ApolloPortAllocation
-type ApolloPortAllocationSpec struct {
-	// NetworkPoolRef references the parent network pool
-	NetworkPoolRef PoolReference `json:"networkPoolRef"`
-
+// PortAllocationSpec defines the desired state of PortAllocation
+type PortAllocationSpec struct {
 	// PodInfo contains the basic information of the pod
 	PodInfo PodInfo `json:"podInfo"`
 
 	// PortBindings contains the detailed port binding information
 	PortBindings []PortBinding `json:"portBindings"`
-
-	// RequestedAt is the timestamp when the ports were requested
-	RequestedAt *metav1.Time `json:"requestedAt,omitempty"`
 }
 
-// PoolReference references an ApolloNetworkPool
-type PoolReference struct {
-	// Name is the name of the network pool
-	Name string `json:"name"`
-
-	// Namespace is the namespace of the network pool (if namespace-scoped)
-	Namespace string `json:"namespace,omitempty"`
-}
-
-// ApolloPortAllocationStatus defines the observed state of ApolloPortAllocation
-type ApolloPortAllocationStatus struct {
+// PortAllocationStatus defines the observed state of PortAllocation
+type PortAllocationStatus struct {
 	// Phase represents the current overall phase of the port allocation
 	Phase AllocationPhase `json:"phase,omitempty"`
 
@@ -201,118 +174,141 @@ type ApolloPortAllocationStatus struct {
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Bindings",type=string,JSONPath=`.status.bindingStatuses[*].phase`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
-// +kubebuilder:resource:shortName=apa
+// +kubebuilder:resource:shortName=pa
 
-// ApolloPortAllocation is the Schema for tracking individual port allocations and their binding status
-type ApolloPortAllocation struct {
+// PortAllocation is the Schema for tracking individual port allocations and their binding status
+type PortAllocation struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   ApolloPortAllocationSpec   `json:"spec,omitempty"`
-	Status ApolloPortAllocationStatus `json:"status,omitempty"`
+	Spec   PortAllocationSpec   `json:"spec,omitempty"`
+	Status PortAllocationStatus `json:"status,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 
-// ApolloPortAllocationList contains a list of ApolloPortAllocation.
-type ApolloPortAllocationList struct {
+// PortAllocationList contains a list of PortAllocation.
+type PortAllocationList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []ApolloPortAllocation `json:"items"`
+	Items           []PortAllocation `json:"items"`
 }
 
 func init() {
-	SchemeBuilder.Register(&ApolloPortAllocation{}, &ApolloPortAllocationList{})
+	SchemeBuilder.Register(&PortAllocation{}, &PortAllocationList{})
 }
 
-// GetAllocatedLBPorts returns all allocated LB ports
-func (apa *ApolloPortAllocation) GetAllocatedLBPorts() []int32 {
+// GetAllAllocatedLBPorts returns all allocated LB ports from all allocations in the list
+func (apl *PortAllocationList) GetAllAllocatedLBPorts() []int32 {
 	var lbPorts []int32
-	for _, binding := range apa.Spec.PortBindings {
-		lbPorts = append(lbPorts, binding.LBPort)
+	for _, allocation := range apl.Items {
+		for _, binding := range allocation.Spec.PortBindings {
+			lbPorts = append(lbPorts, binding.LBPort)
+		}
 	}
 	return lbPorts
 }
 
-// GetAllocatedPodPorts returns all allocated pod ports
-func (apa *ApolloPortAllocation) GetAllocatedPodPorts() []int32 {
+// GetAllAllocatedPodPorts returns all allocated pod ports from all allocations in the list
+func (apl *PortAllocationList) GetAllAllocatedPodPorts() []int32 {
 	var podPorts []int32
-	for _, binding := range apa.Spec.PortBindings {
-		podPorts = append(podPorts, binding.PodPort)
+	for _, allocation := range apl.Items {
+		for _, binding := range allocation.Spec.PortBindings {
+			podPorts = append(podPorts, binding.PodPort)
+		}
 	}
 	return podPorts
 }
 
-// IsBound returns true if all ports are successfully bound
-func (apa *ApolloPortAllocation) IsBound() bool {
-	if apa.Status.Phase != AllocationPhaseBound {
-		return false
-	}
-	
-	for _, status := range apa.Status.BindingStatuses {
-		if status.Phase != AllocationPhaseBound {
-			return false
+// GetBoundAllocations returns all allocations that are successfully bound
+func (apl *PortAllocationList) GetBoundAllocations() []PortAllocation {
+	var boundAllocations []PortAllocation
+	for _, allocation := range apl.Items {
+		if allocation.Status.Phase == AllocationPhaseBound {
+			allBound := true
+			for _, status := range allocation.Status.BindingStatuses {
+				if status.Phase != AllocationPhaseBound {
+					allBound = false
+					break
+				}
+			}
+			if allBound {
+				boundAllocations = append(boundAllocations, allocation)
+			}
 		}
 	}
-	return true
+	return boundAllocations
 }
 
-// IsPending returns true if the allocation is in pending phase
-func (apa *ApolloPortAllocation) IsPending() bool {
-	return apa.Status.Phase == AllocationPhasePending
-}
-
-// IsFailed returns true if the allocation is in failed phase
-func (apa *ApolloPortAllocation) IsFailed() bool {
-	return apa.Status.Phase == AllocationPhaseFailed
-}
-
-// GetBindingStatusByPodPort finds binding status by pod port
-func (apa *ApolloPortAllocation) GetBindingStatusByPodPort(podPort int32) *BindingStatus {
-	for i := range apa.Status.BindingStatuses {
-		if apa.Status.BindingStatuses[i].PodPort == podPort {
-			return &apa.Status.BindingStatuses[i]
+// GetPendingAllocations returns all allocations that are in pending phase
+func (apl *PortAllocationList) GetPendingAllocations() []PortAllocation {
+	var pendingAllocations []PortAllocation
+	for _, allocation := range apl.Items {
+		if allocation.Status.Phase == AllocationPhasePending {
+			pendingAllocations = append(pendingAllocations, allocation)
 		}
 	}
-	return nil
+	return pendingAllocations
 }
 
-// GetBindingStatusByLBPort finds binding status by LB port
-func (apa *ApolloPortAllocation) GetBindingStatusByLBPort(lbPort int32) *BindingStatus {
-	for i := range apa.Status.BindingStatuses {
-		if apa.Status.BindingStatuses[i].LBPort == lbPort {
-			return &apa.Status.BindingStatuses[i]
+// GetFailedAllocations returns all allocations that are in failed phase
+func (apl *PortAllocationList) GetFailedAllocations() []PortAllocation {
+	var failedAllocations []PortAllocation
+	for _, allocation := range apl.Items {
+		if allocation.Status.Phase == AllocationPhaseFailed {
+			failedAllocations = append(failedAllocations, allocation)
 		}
 	}
-	return nil
+	return failedAllocations
 }
 
-// GetPortBindingByPodPort finds port binding by pod port
-func (apa *ApolloPortAllocation) GetPortBindingByPodPort(podPort int32) *PortBinding {
-	for i := range apa.Spec.PortBindings {
-		if apa.Spec.PortBindings[i].PodPort == podPort {
-			return &apa.Spec.PortBindings[i]
+// FindAllocationsByPodPort finds all allocations that contain a specific pod port
+func (apl *PortAllocationList) FindAllocationsByPodPort(podPort int32) []PortAllocation {
+	var matchingAllocations []PortAllocation
+	for _, allocation := range apl.Items {
+		for _, binding := range allocation.Spec.PortBindings {
+			if binding.PodPort == podPort {
+				matchingAllocations = append(matchingAllocations, allocation)
+				break
+			}
 		}
 	}
-	return nil
+	return matchingAllocations
 }
 
-// GetPortBindingByLBPort finds port binding by LB port
-func (apa *ApolloPortAllocation) GetPortBindingByLBPort(lbPort int32) *PortBinding {
-	for i := range apa.Spec.PortBindings {
-		if apa.Spec.PortBindings[i].LBPort == lbPort {
-			return &apa.Spec.PortBindings[i]
+// FindAllocationsByLBPort finds all allocations that contain a specific LB port
+func (apl *PortAllocationList) FindAllocationsByLBPort(lbPort int32) []PortAllocation {
+	var matchingAllocations []PortAllocation
+	for _, allocation := range apl.Items {
+		for _, binding := range allocation.Spec.PortBindings {
+			if binding.LBPort == lbPort {
+				matchingAllocations = append(matchingAllocations, allocation)
+				break
+			}
 		}
 	}
-	return nil
+	return matchingAllocations
 }
 
-// GetLoadBalancerRefs returns all unique load balancer references
-func (apa *ApolloPortAllocation) GetLoadBalancerRefs() []LoadBalancerRef {
+// FindAllocationsByPodInfo finds all allocations for a specific pod
+func (apl *PortAllocationList) FindAllocationsByPodInfo(namespace, name string) []PortAllocation {
+	var matchingAllocations []PortAllocation
+	for _, allocation := range apl.Items {
+		if allocation.Spec.PodInfo.Namespace == namespace && allocation.Spec.PodInfo.Name == name {
+			matchingAllocations = append(matchingAllocations, allocation)
+		}
+	}
+	return matchingAllocations
+}
+
+// GetAllLoadBalancerRefs returns all unique load balancer references from all allocations
+func (apl *PortAllocationList) GetAllLoadBalancerRefs() []LoadBalancerRef {
 	lbRefMap := make(map[string]LoadBalancerRef)
 	
-	for _, binding := range apa.Spec.PortBindings {
-		lbRefMap[binding.LoadBalancerRef.ID] = binding.LoadBalancerRef
+	for _, allocation := range apl.Items {
+		for _, binding := range allocation.Spec.PortBindings {
+			lbRefMap[binding.LoadBalancerRef.ID] = binding.LoadBalancerRef
+		}
 	}
 	
 	var lbRefs []LoadBalancerRef
@@ -323,15 +319,55 @@ func (apa *ApolloPortAllocation) GetLoadBalancerRefs() []LoadBalancerRef {
 	return lbRefs
 }
 
-// CountPortsByBindingType returns the count of ports by binding type
-func (apa *ApolloPortAllocation) CountPortsByBindingType() map[BindingType]int {
+// CountAllPortsByBindingType returns the total count of ports by binding type across all allocations
+func (apl *PortAllocationList) CountAllPortsByBindingType() map[BindingType]int {
 	counts := make(map[BindingType]int)
 	
-	for _, binding := range apa.Spec.PortBindings {
-		counts[binding.BindingType]++
+	for _, allocation := range apl.Items {
+		for _, binding := range allocation.Spec.PortBindings {
+			counts[binding.BindingType]++
+		}
 	}
 	
 	return counts
+}
+
+// GetAllocationsByPhase returns all allocations in a specific phase
+func (apl *PortAllocationList) GetAllocationsByPhase(phase AllocationPhase) []PortAllocation {
+	var matchingAllocations []PortAllocation
+	for _, allocation := range apl.Items {
+		if allocation.Status.Phase == phase {
+			matchingAllocations = append(matchingAllocations, allocation)
+		}
+	}
+	return matchingAllocations
+}
+
+// CountAllocationsByPhase returns the count of allocations by phase
+func (apl *PortAllocationList) CountAllocationsByPhase() map[AllocationPhase]int {
+	counts := make(map[AllocationPhase]int)
+	
+	for _, allocation := range apl.Items {
+		counts[allocation.Status.Phase]++
+	}
+	
+	return counts
+}
+
+// HasPortConflicts checks if there are any port conflicts in the list
+func (apl *PortAllocationList) HasPortConflicts() bool {
+	lbPortMap := make(map[int32]bool)
+	
+	for _, allocation := range apl.Items {
+		for _, binding := range allocation.Spec.PortBindings {
+			if lbPortMap[binding.LBPort] {
+				return true // Found conflict
+			}
+			lbPortMap[binding.LBPort] = true
+		}
+	}
+	
+	return false
 }
 
 // GetDefaultBindingType returns the default binding type (volcengine-clb)
