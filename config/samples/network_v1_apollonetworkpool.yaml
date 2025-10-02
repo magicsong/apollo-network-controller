@@ -1,0 +1,9 @@
+apiVersion: network.apollo.network/v1
+kind: ApolloNetworkPool
+metadata:
+  labels:
+    app.kubernetes.io/name: apollo-network-controller
+    app.kubernetes.io/managed-by: kustomize
+  name: apollonetworkpool-sample
+spec:
+  # TODO(user): Add fields here
