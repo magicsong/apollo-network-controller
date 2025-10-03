@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	apollov1 "github.com/magicsong/apollo-network-controller/api/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -37,6 +38,34 @@ func NewPoolAllocator(client client.Client, strategy LoadBalancerStrategy) *Pool
 		strategy:        strategy,
 		roundRobinIndex: make(map[string]int),
 	}
+}
+
+type poolAndAllocations struct{
+	pool *apollov1.ApolloNetworkPool
+	allocations *apollov1.PortAllocationList
+}
+
+// getPoolAndAllocations retrieves both the pool and its allocations in a single operation
+func (pa *PoolAllocator) getPoolAndAllocations(ctx context.Context, poolName, namespace string) (*poolAndAllocations, error) {
+	// Get current pool state
+	pool := &apollov1.ApolloNetworkPool{}
+	poolKey := types.NamespacedName{Name: poolName, Namespace: namespace}
+
+	if err := pa.client.Get(ctx, poolKey, pool); err != nil {
+		return nil, fmt.Errorf("failed to get pool %s: %w", poolName, err)
+	}
+
+	// Get current allocations for this pool
+	allocations := &apollov1.PortAllocationList{}
+	err := pa.client.List(ctx, allocations, client.MatchingLabels{LabelPoolNameKey: pool.Name})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list port allocations for pool %s: %w", pool.Name, err)
+	}
+
+	return &poolAndAllocations{
+		pool:        pool,
+		allocations: allocations,
+	}, nil
 }
 
 // AllocatePort allocates a port for the given pod

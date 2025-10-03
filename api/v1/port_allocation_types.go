@@ -198,23 +198,14 @@ func init() {
 	SchemeBuilder.Register(&PortAllocation{}, &PortAllocationList{})
 }
 
-// GetAllAllocatedLBPorts returns all allocated LB ports from all allocations in the list
-func (apl *PortAllocationList) GetAllAllocatedLBPorts() []int32 {
-	var lbPorts []int32
+// GetAllAllocatedPodPorts returns all allocated pod ports from all allocations in the list as a map for efficient lookup
+func (apl *PortAllocationList) GetAllocatedPortsByLB(loadBalanceID string) map[int32]bool {
+	podPorts := make(map[int32]bool)
 	for _, allocation := range apl.Items {
 		for _, binding := range allocation.Spec.PortBindings {
-			lbPorts = append(lbPorts, binding.LBPort)
-		}
-	}
-	return lbPorts
-}
-
-// GetAllAllocatedPodPorts returns all allocated pod ports from all allocations in the list
-func (apl *PortAllocationList) GetAllAllocatedPodPorts() []int32 {
-	var podPorts []int32
-	for _, allocation := range apl.Items {
-		for _, binding := range allocation.Spec.PortBindings {
-			podPorts = append(podPorts, binding.PodPort)
+			if binding.LoadBalancerRef.ID == loadBalanceID {
+				podPorts[binding.PodPort] = true
+			}
 		}
 	}
 	return podPorts
