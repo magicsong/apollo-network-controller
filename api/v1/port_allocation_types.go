@@ -200,15 +200,15 @@ func init() {
 
 // GetAllAllocatedPodPorts returns all allocated pod ports from all allocations in the list as a map for efficient lookup
 func (apl *PortAllocationList) GetAllocatedPortsByLB(loadBalanceID string) map[int32]bool {
-	podPorts := make(map[int32]bool)
+	ports := make(map[int32]bool)
 	for _, allocation := range apl.Items {
 		for _, binding := range allocation.Spec.PortBindings {
 			if binding.LoadBalancerRef.ID == loadBalanceID {
-				podPorts[binding.PodPort] = true
+				ports[binding.LBPort] = true
 			}
 		}
 	}
-	return podPorts
+	return ports
 }
 
 // GetBoundAllocations returns all allocations that are successfully bound

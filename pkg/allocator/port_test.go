@@ -322,7 +322,7 @@ func TestTryAllocatePort_InsufficientPorts(t *testing.T) {
 	// Verify
 	assert.Error(t, err)
 	assert.Nil(t, allocation)
-	assert.Contains(t, err.Error(), "failed to find available ports")
+	assert.Contains(t, err.Error(), "no load balancer has 1 available ports")
 }
 
 func TestTryAllocatePort_LeastUsedStrategy(t *testing.T) {
