@@ -48,11 +48,7 @@ type ApolloNetworkPoolReconciler struct {
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
-// TODO(user): Modify the Reconcile function to compare the state specified by
-// the ApolloNetworkPool object against the actual cluster state, and then
-// perform operations to make the cluster state reflect the state specified by
-// the user.
-//
+
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.21.0/pkg/reconcile
 func (r *ApolloNetworkPoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -76,7 +72,7 @@ func (r *ApolloNetworkPoolReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		return ctrl.Result{RequeueAfter: time.Minute}, err
 	}
 
-	return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
+	return ctrl.Result{RequeueAfter: 10 * time.Minute}, nil
 }
 
 // updatePoolStatus calculates and updates the status of the ApolloNetworkPool
@@ -222,7 +218,6 @@ func (r *ApolloNetworkPoolReconciler) mapPortAllocationToPool(ctx context.Contex
 		{
 			NamespacedName: types.NamespacedName{
 				Name: poolName,
-				// No Namespace since ApolloNetworkPool is cluster-scoped
 			},
 		},
 	}

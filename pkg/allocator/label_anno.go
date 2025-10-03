@@ -15,4 +15,9 @@ const (
 	AnnotationBindingTypeKey    = "apollo.magicsong.io/binding-type"
 	AnnotationAllocatedByKey    = "apollo.magicsong.io/allocated-by"
 	AnnotationAllocationIdKey   = "apollo.magicsong.io/allocation-id"
+
+	// Pod annotation keys - these are used to mark Pods that need port allocation
+	PodAnnotationNetworkPoolKey    = "apollo.magicsong.io/network-pool"  // Specifies which pool to use
+	PodAnnotationContainerPortsKey = "apollo.magicsong.io/container-ports" // JSON array of container ports
+	PodAnnotationEnableAllocKey    = "apollo.magicsong.io/enable-allocation" // Enable allocation for this pod
 )
