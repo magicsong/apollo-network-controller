@@ -2,91 +2,59 @@ package allocator
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"time"
 
 	apollov1 "github.com/magicsong/apollo-network-controller/api/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// ReleasePort releases a port allocation using patch
+// ReleasePort releases a port allocation by deleting the PortAllocation resource
 func (pa *PoolAllocator) ReleasePort(ctx context.Context, poolName, namespace string,
 	podName, podNamespace string) error {
 
-	// Use pool-level mutex
+	// Use pool-level mutex to prevent race conditions
 	poolMutex := pa.getPoolMutex(poolName, namespace)
 	poolMutex.Lock()
 	defer poolMutex.Unlock()
 
-	// Get current pool
-	pool := &apollov1.ApolloNetworkPool{}
-	poolKey := types.NamespacedName{Name: poolName, Namespace: namespace}
-
-	if err := pa.client.Get(ctx, poolKey, pool); err != nil {
-		return fmt.Errorf("failed to get pool %s: %w", poolName, err)
+	// Construct the expected allocation name (consistent with AllocatePort naming)
+	allocationName := fmt.Sprintf("%s-%s", poolName, podName)
+	allocationKey := types.NamespacedName{
+		Name:      allocationName,
+		Namespace: namespace,
 	}
 
-	// Find and remove allocation
-	var targetLBID string
-	var updatedAllocations []apollov1.PortAllocation
-	found := false
-
-	if pool.Status.Allocations != nil {
-		for lbID, lbStatus := range pool.Status.Allocations {
-			for _, alloc := range lbStatus.AllocatedPorts {
-				if alloc.Spec.PodInfo.Name == podName && alloc.Spec.PodInfo.Namespace == podNamespace {
-					targetLBID = lbID
-					found = true
-					// Skip this allocation (remove it)
-					continue
-				}
-				updatedAllocations = append(updatedAllocations, alloc)
-			}
-			if found {
-				break
-			}
-		}
-	}
-
-	if !found {
-		return fmt.Errorf("port allocation not found for pod %s/%s", podNamespace, podName)
-	}
-
-	// Calculate updated counters
-	totalPorts := pool.Spec.PortRange.Max - pool.Spec.PortRange.Min + 1 - int32(len(pool.Spec.PortRange.ExcludedPorts))
-	currentLBStatus := pool.Status.Allocations[targetLBID]
-
-	// Update the status with removed allocation
-	currentLBStatus.AllocatedPorts = updatedAllocations
-	// Count ports manually since GetPortCount method doesn't exist
-	portCount := int32(0)
-	for _, alloc := range currentLBStatus.AllocatedPorts {
-		portCount += int32(len(alloc.Spec.PortBindings))
-	}
-	currentLBStatus.AllocatedCount = portCount
-	currentLBStatus.AvailableCount = totalPorts - currentLBStatus.AllocatedCount - currentLBStatus.PrewarmedCount
-
-	// Update timestamp
-	now := metav1.Time{Time: time.Now()}
-	currentLBStatus.LastUpdated = &now
-
-	// Create patch
-	patch := map[string]interface{}{
-		"status": map[string]interface{}{
-			"allocations": map[string]interface{}{
-				targetLBID: currentLBStatus,
-			},
-		},
-	}
-
-	patchBytes, err := json.Marshal(patch)
+	// Get the allocation resource
+	allocation := &apollov1.PortAllocation{}
+	err := pa.client.Get(ctx, allocationKey, allocation)
 	if err != nil {
-		return fmt.Errorf("failed to marshal patch: %w", err)
+		if client.IgnoreNotFound(err) != nil {
+			return fmt.Errorf("failed to get allocation %s: %w", allocationName, err)
+		}
+		// Allocation not found
+		return fmt.Errorf("port allocation not found for pod %s/%s in pool %s", podNamespace, podName, poolName)
 	}
 
-	// Apply patch
-	return pa.client.Status().Patch(ctx, pool, client.RawPatch(types.StrategicMergePatchType, patchBytes))
+	// Verify the allocation belongs to the correct pod and namespace
+	if allocation.Spec.PodInfo.Name != podName || allocation.Spec.PodInfo.Namespace != podNamespace {
+		return fmt.Errorf("allocation %s does not belong to pod %s/%s", allocationName, podNamespace, podName)
+	}
+
+	// Verify the allocation belongs to the correct pool
+	if allocation.Labels[LabelPoolNameKey] != poolName {
+		return fmt.Errorf("allocation %s does not belong to pool %s", allocationName, poolName)
+	}
+
+	// Check if allocation is already being deleted
+	if allocation.DeletionTimestamp != nil {
+		return fmt.Errorf("allocation %s is already being deleted", allocationName)
+	}
+
+	// Delete the allocation resource
+	if err := pa.client.Delete(ctx, allocation); err != nil {
+		return fmt.Errorf("failed to delete allocation %s: %w", allocationName, err)
+	}
+
+	return nil
 }

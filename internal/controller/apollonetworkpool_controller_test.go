@@ -51,7 +51,20 @@ var _ = Describe("ApolloNetworkPool Controller", func() {
 						Name:      resourceName,
 						Namespace: "default",
 					},
-					// TODO(user): Specify other spec details if needed.
+					Spec: networkv1.ApolloNetworkPoolSpec{
+						LoadBalancers: []networkv1.LoadBalancerRef{
+							{
+								ID:       "test-lb-1",
+								Region:   "us-west-1",
+								Provider: "test-provider",
+							},
+						},
+						ISPLineType: networkv1.ISPLineTypeBGP,
+						PortRange: networkv1.PortRange{
+							Min: 30000,
+							Max: 30099,
+						},
+					},
 				}
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 			}
