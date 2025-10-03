@@ -373,6 +373,48 @@ func TestPodReconciler_parseNetworkPools(t *testing.T) {
 			hasError: true,
 			desc:     "Should return error when no valid pools found",
 		},
+		{
+			name: "Deduplicate comma-separated pools",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-pod",
+					Annotations: map[string]string{
+						allocator.PodAnnotationNetworkPoolKey: "pool1,pool2,pool1,pool3,pool2",
+					},
+				},
+			},
+			expected: []string{"pool1", "pool2", "pool3"},
+			hasError: false,
+			desc:     "Should deduplicate pools while preserving order",
+		},
+		{
+			name: "Deduplicate JSON array pools",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-pod",
+					Annotations: map[string]string{
+						allocator.PodAnnotationNetworkPoolKey: `["pool1","pool2","pool1","pool3","pool2","pool1"]`,
+					},
+				},
+			},
+			expected: []string{"pool1", "pool2", "pool3"},
+			hasError: false,
+			desc:     "Should deduplicate JSON array pools while preserving order",
+		},
+		{
+			name: "Deduplicate with whitespace variations",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-pod",
+					Annotations: map[string]string{
+						allocator.PodAnnotationNetworkPoolKey: " pool1 , pool2,  pool1  ,pool3, pool2 ",
+					},
+				},
+			},
+			expected: []string{"pool1", "pool2", "pool3"},
+			hasError: false,
+			desc:     "Should handle whitespace and deduplicate correctly",
+		},
 	}
 
 	for _, tt := range tests {

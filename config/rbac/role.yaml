@@ -56,3 +56,11 @@ rules:
   - get
   - patch
   - update
+- apiGroups:
+  - network.apollo.network
+  resources:
+  - portallocations
+  verbs:
+  - get
+  - list
+  - watch

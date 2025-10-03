@@ -24,9 +24,11 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -92,7 +94,6 @@ func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 }
 
 // shouldManagePod checks if the Pod has our annotations and should be managed
-// Memory optimization: Only perform annotation checks, avoid heavy operations
 func (r *PodReconciler) shouldManagePod(pod *corev1.Pod) bool {
 	if pod.Annotations == nil {
 		return false
@@ -119,45 +120,39 @@ func (r *PodReconciler) parseNetworkPools(pod *corev1.Pod) ([]string, error) {
 		return nil, fmt.Errorf("network pool annotation is missing or empty")
 	}
 
+	var rawPools []string
+
 	// Try JSON array format first (if it looks like JSON)
 	if strings.HasPrefix(poolsAnnotation, "[") && strings.HasSuffix(poolsAnnotation, "]") {
-		var pools []string
-		if err := json.Unmarshal([]byte(poolsAnnotation), &pools); err != nil {
+		if err := json.Unmarshal([]byte(poolsAnnotation), &rawPools); err != nil {
 			// If it looks like JSON but fails to parse, return error (don't fallback to comma-separated)
 			return nil, fmt.Errorf("failed to parse pools JSON array: %w", err)
 		}
-		
-		// Validate parsed pools are not empty
-		var validPools []string
-		for _, pool := range pools {
-			pool = strings.TrimSpace(pool)
-			if pool != "" {
+	} else {
+		// Fallback to comma-separated format
+		rawPools = strings.Split(poolsAnnotation, ",")
+	}
+
+	// Clean, validate and deduplicate pools
+	poolsSet := make(map[string]struct{})
+	var validPools []string
+	
+	for _, pool := range rawPools {
+		pool = strings.TrimSpace(pool)
+		if pool != "" {
+			// Use map to deduplicate pools while preserving order
+			if _, exists := poolsSet[pool]; !exists {
+				poolsSet[pool] = struct{}{}
 				validPools = append(validPools, pool)
 			}
 		}
-		
-		if len(validPools) == 0 {
-			return nil, fmt.Errorf("no valid pools found in JSON array")
-		}
-		
-		return validPools, nil
 	}
 
-	// Fallback to comma-separated format
-	pools := strings.Split(poolsAnnotation, ",")
-	var cleanPools []string
-	for _, pool := range pools {
-		pool = strings.TrimSpace(pool)
-		if pool != "" {
-			cleanPools = append(cleanPools, pool)
-		}
-	}
-
-	if len(cleanPools) == 0 {
+	if len(validPools) == 0 {
 		return nil, fmt.Errorf("no valid pools found in annotation")
 	}
 
-	return cleanPools, nil
+	return validPools, nil
 }
 
 // handlePodDeletion handles port release when Pod is being deleted
@@ -210,7 +205,7 @@ func (r *PodReconciler) handlePodDeletion(ctx context.Context, pod *corev1.Pod) 
 func (r *PodReconciler) handlePodAllocation(ctx context.Context, pod *corev1.Pod) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 	
-	// Parse network pools (support multi-pool)
+	// Parse network pools
 	pools, err := r.parseNetworkPools(pod)
 	if err != nil {
 		log.Error(err, "Failed to parse network pools", "pod", pod.Name)
@@ -384,7 +379,7 @@ func (r *PodReconciler) findExistingAllocation(ctx context.Context, poolName, po
 	err := r.List(ctx, allocationList, client.MatchingLabels{
 		allocator.LabelPoolNameKey: poolName,
 		allocator.LabelPodNameKey:  podName,
-	}, client.Limit(100)) // Limit results for memory efficiency
+	}, client.Limit(100))
 	if err != nil {
 		return nil, err
 	}
@@ -399,10 +394,92 @@ func (r *PodReconciler) findExistingAllocation(ctx context.Context, poolName, po
 	return nil, nil
 }
 
+// podTransform reduces memory usage by keeping only essential Pod fields in cache
+// This is crucial for large scale deployments (4000+ Pods)
+func PodTransform(obj interface{}) (interface{}, error) {
+	pod, ok := obj.(*corev1.Pod)
+	if !ok {
+		return obj, nil
+	}
+	
+	// Create a new Pod with only essential fields to reduce memory usage
+	transformedPod := &corev1.Pod{
+		TypeMeta: pod.TypeMeta,
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              pod.Name,
+			Namespace:         pod.Namespace,
+			UID:               pod.UID,
+			ResourceVersion:   pod.ResourceVersion,
+			Generation:        pod.Generation,
+			DeletionTimestamp: pod.DeletionTimestamp,
+			Finalizers:        pod.Finalizers,
+			// Keep only our relevant annotations
+			Annotations:       filterRelevantAnnotations(pod.Annotations),
+			Labels:            pod.Labels, // Keep labels for potential filtering needs
+		},
+		Spec: corev1.PodSpec{
+			// Only keep container ports info, discard other spec details
+			Containers: transformContainers(pod.Spec.Containers),
+		},
+		Status: corev1.PodStatus{
+			Phase: pod.Status.Phase, // Keep phase for lifecycle management
+		},
+	}
+	
+	return transformedPod, nil
+}
+
+// filterRelevantAnnotations keeps only Apollo-related annotations to reduce memory
+func filterRelevantAnnotations(annotations map[string]string) map[string]string {
+	if annotations == nil {
+		return nil
+	}
+	
+	relevantAnnotations := make(map[string]string)
+	
+	// Keep only our specific annotations
+	if val, exists := annotations[allocator.PodAnnotationEnableAllocKey]; exists {
+		relevantAnnotations[allocator.PodAnnotationEnableAllocKey] = val
+	}
+	if val, exists := annotations[allocator.PodAnnotationNetworkPoolKey]; exists {
+		relevantAnnotations[allocator.PodAnnotationNetworkPoolKey] = val
+	}
+	if val, exists := annotations[allocator.PodAnnotationContainerPortsKey]; exists {
+		relevantAnnotations[allocator.PodAnnotationContainerPortsKey] = val
+	}
+	
+	// Return nil if no relevant annotations found to save memory
+	if len(relevantAnnotations) == 0 {
+		return nil
+	}
+	
+	return relevantAnnotations
+}
+
+// transformContainers keeps only port information from containers to reduce memory
+func transformContainers(containers []corev1.Container) []corev1.Container {
+	if len(containers) == 0 {
+		return nil
+	}
+	
+	transformedContainers := make([]corev1.Container, len(containers))
+	for i, container := range containers {
+		transformedContainers[i] = corev1.Container{
+			Name:  container.Name,
+			Ports: container.Ports, // Only keep ports, discard other container details
+		}
+	}
+	
+	return transformedContainers
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *PodReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&corev1.Pod{}).
 		Named("pod").
+		WithOptions(controller.Options{
+			MaxConcurrentReconciles: 10, // Allow parallel processing for better throughput
+		}).
 		Complete(r)
 }
