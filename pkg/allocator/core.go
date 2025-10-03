@@ -76,7 +76,7 @@ func (pa *PoolAllocator) AllocatePort(ctx context.Context, poolName, namespace s
 	poolMutex := pa.getPoolMutex(poolName, namespace)
 	poolMutex.Lock()
 	defer poolMutex.Unlock()
-
+	
 	var allocation *apollov1.PortAllocation
 	var err error
 
@@ -87,52 +87,11 @@ func (pa *PoolAllocator) AllocatePort(ctx context.Context, poolName, namespace s
 			return err
 		}
 		
-		// Create or update the allocation in apiserver
-		return pa.createOrUpdateAllocation(ctx, allocation)
+		// Create the allocation in apiserver
+		return pa.createAllocation(ctx, allocation)
 	})
 
 	return allocation, err
-}
-
-// createOrUpdateAllocation creates or updates a port allocation in the apiserver
-func (pa *PoolAllocator) createOrUpdateAllocation(ctx context.Context, allocation *apollov1.PortAllocation) error {
-	if allocation == nil {
-		return fmt.Errorf("allocation cannot be nil")
-	}
-
-	// Check if allocation already exists
-	existing := &apollov1.PortAllocation{}
-	key := types.NamespacedName{Name: allocation.Name, Namespace: allocation.Namespace}
-	
-	err := pa.client.Get(ctx, key, existing)
-	if err != nil {
-		if client.IgnoreNotFound(err) != nil {
-			return fmt.Errorf("failed to get existing allocation: %w", err)
-		}
-		
-		// Allocation doesn't exist, create it
-		if err := pa.client.Create(ctx, allocation); err != nil {
-			return fmt.Errorf("failed to create port allocation: %w", err)
-		}
-		return nil
-	}
-
-	// Allocation exists, check if it's being deleted
-	if existing.DeletionTimestamp != nil {
-		return fmt.Errorf("allocation %s/%s is being deleted, cannot update", 
-			existing.Namespace, existing.Name)
-	}
-
-	// Update existing allocation
-	allocation.ResourceVersion = existing.ResourceVersion
-	allocation.UID = existing.UID
-	allocation.CreationTimestamp = existing.CreationTimestamp
-	
-	if err := pa.client.Update(ctx, allocation); err != nil {
-		return fmt.Errorf("failed to update port allocation: %w", err)
-	}
-	
-	return nil
 }
 
 // getPoolMutex gets or creates a mutex for the specific pool
@@ -143,3 +102,4 @@ func (pa *PoolAllocator) getPoolMutex(poolName, namespace string) *sync.Mutex {
 	value, _ := pa.poolMutexes.LoadOrStore(key, &sync.Mutex{})
 	return value.(*sync.Mutex)
 }
+
