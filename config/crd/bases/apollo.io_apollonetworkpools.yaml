@@ -4,9 +4,9 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.18.0
-  name: apollonetworkpools.network.apollo.network
+  name: apollonetworkpools.apollo.io
 spec:
-  group: network.apollo.network
+  group: apollo.io
   names:
     kind: ApolloNetworkPool
     listKind: ApolloNetworkPoolList

@@ -2,8 +2,8 @@
 # since it depends on service name and namespace that are out of this kustomize package.
 # It should be run by config/default
 resources:
-- bases/network.apollo.network_apollonetworkpools.yaml
-- bases/network.apollo.network_apolloportallocations.yaml
+- bases/apollo.io_apollonetworkpools.yaml
+- bases/apollo.io_portallocations.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 patches:

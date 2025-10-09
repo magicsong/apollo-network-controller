@@ -4,9 +4,9 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.18.0
-  name: portallocations.network.apollo.network
+  name: portallocations.apollo.io
 spec:
-  group: network.apollo.network
+  group: apollo.io
   names:
     kind: PortAllocation
     listKind: PortAllocationList

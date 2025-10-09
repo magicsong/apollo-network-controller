@@ -3,7 +3,7 @@
 # and allow the plugins properly work.
 # More info: https://book.kubebuilder.io/reference/project-config.html
 cliVersion: 4.6.0
-domain: apollo.network
+domain: apollo.io
 layout:
 - go.kubebuilder.io/v4
 projectName: apollo-network-controller
@@ -13,7 +13,7 @@ resources:
     crdVersion: v1
     namespaced: true
   controller: true
-  domain: apollo.network
+  domain: apollo.io
   group: network
   kind: ApolloNetworkPool
   path: github.com/magicsong/apollo-network-controller/api/v1
@@ -27,9 +27,9 @@ resources:
 - api:
     crdVersion: v1
     namespaced: true
-  domain: apollo.network
+  domain: apollo.io
   group: network
-  kind: ApolloPortAllocation
+  kind: PortAllocation
   path: github.com/magicsong/apollo-network-controller/api/v1
   version: v1
 version: "3"
